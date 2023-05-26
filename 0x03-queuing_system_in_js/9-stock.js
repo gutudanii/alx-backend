@@ -1,103 +1,120 @@
-#!/usr/bin/node
-/**
- * Stock check
- */
+#!/usr/bin/yarn dev
+import express from 'express';
 import { promisify } from 'util';
 import { createClient } from 'redis';
-import express from 'express';
-
-const redisClient = createClient();
-
-redisClient.on('err', (err) => {
-  console.log('Redis client not connected to the server:', err.toString());
-});
 
 const listProducts = [
   {
-    Id: 1, name: 'Suitcase 250', price: 50, stock: 4,
+    itemId: 1,
+    itemName: 'Suitcase 250',
+    price: 50,
+    initialAvailableQuantity: 4
   },
   {
-    Id: 2, name: 'Suitcase 450', price: 100, stock: 10,
+    itemId: 2,
+    itemName: 'Suitcase 450',
+    price: 100,
+    initialAvailableQuantity: 10
   },
   {
-    Id: 3, name: 'Suitcase 650', price: 350, stock: 2,
+    itemId: 3,
+    itemName: 'Suitcase 650',
+    price: 350,
+    initialAvailableQuantity: 2
   },
   {
-    Id: 4, name: 'Suitcase 1050', price: 550, stock: 5,
+    itemId: 4,
+    itemName: 'Suitcase 1050',
+    price: 550,
+    initialAvailableQuantity: 5
   },
 ];
 
-function transform(product) {
-  const modified = {};
-  modified.itemId = product.Id;
-  modified.itemName = product.name;
-  modified.price = product.price;
-  modified.initialAvailableQuantity = product.stock;
-  return modified;
-}
+const getItemById = (id) => {
+  const item = listProducts.find(obj => obj.itemId === id);
 
-function getItemById(id) {
-  for (const product of listProducts) {
-    if (product.Id === id) {
-      return transform(product);
-    }
+  if (item) {
+    return Object.fromEntries(Object.entries(item));
   }
-  return {};
-}
-
-function getItems() {
-  return listProducts.map(transform);
-}
-
-function reserveStockById(itemId, stock) {
-  const SET = promisify(redisClient.SET).bind(redisClient);
-  return SET(`item.${itemId}`, stock);
-}
-
-async function getCurrentReservedStockById(itemId) {
-  const GET = promisify(redisClient.GET).bind(redisClient);
-  const stock = await GET(`item.${itemId}`);
-  if (stock === null) return 0;
-  return stock;
-}
+};
 
 const app = express();
+const client = createClient();
+const PORT = 1245;
 
-app.get('/list_products', (req, res) => {
-  res.json(getItems());
+/**
+ * Modifies the reserved stock for a given item.
+ * @param {number} itemId - The id of the item.
+ * @param {number} stock - The stock of the item.
+ */
+const reserveStockById = async (itemId, stock) => {
+  return promisify(client.SET).bind(client)(`item.${itemId}`, stock);
+};
+
+/**
+ * Retrieves the reserved stock for a given item.
+ * @param {number} itemId - The id of the item.
+ * @returns {Promise<String>}
+ */
+const getCurrentReservedStockById = async (itemId) => {
+  return promisify(client.GET).bind(client)(`item.${itemId}`);
+};
+
+app.get('/list_products', (_, res) => {
+  res.json(listProducts);
 });
 
-app.get('/list_products/:itemId', async (req, res) => {
-  const itemId = Number(req.params.itemId);
-  const item = getItemById(itemId);
-  if (Object.values(item).length > 0) {
-    const stock = await getCurrentReservedStockById(itemId);
-    item.currentQuantity = item.initialAvailableQuantity - stock;
-    return res.json(item);
+app.get('/list_products/:itemId(\\d+)', (req, res) => {
+  const itemId = Number.parseInt(req.params.itemId);
+  const productItem = getItemById(Number.parseInt(itemId));
+
+  if (!productItem) {
+    res.json({ status: 'Product not found' });
+    return;
   }
-  return res.json({ status: 'Product not found' });
+  getCurrentReservedStockById(itemId)
+    .then((result) => Number.parseInt(result || 0))
+    .then((reservedStock) => {
+      productItem.currentQuantity = productItem.initialAvailableQuantity - reservedStock;
+      res.json(productItem);
+    });
 });
 
-app.get('/reserve_product/:itemId', async (req, res) => {
-  const itemId = Number(req.params.itemId);
-  const item = getItemById(itemId);
-  if (Object.values(item).length === 0) {
-    return res.json({ status: 'Product not found' });
+app.get('/reserve_product/:itemId', (req, res) => {
+  const itemId = Number.parseInt(req.params.itemId);
+  const productItem = getItemById(Number.parseInt(itemId));
+
+  if (!productItem) {
+    res.json({ status: 'Product not found' });
+    return;
   }
-  const stock = await getCurrentReservedStockById(itemId);
-  if (stock >= item.initialAvailableQuantity) {
-    return res.json({ status: 'Not enough stock available', itemId });
-  }
-  await reserveStockById(itemId, Number(stock) + 1);
-  return res.json({ status: 'Reservation confirmed', itemId });
+  getCurrentReservedStockById(itemId)
+    .then((result) => Number.parseInt(result || 0))
+    .then((reservedStock) => {
+      if (reservedStock >= productItem.initialAvailableQuantity) {
+        res.json({ status: 'Not enough stock available', itemId });
+        return;
+      }
+      reserveStockById(itemId, reservedStock + 1)
+        .then(() => {
+          res.json({ status: 'Reservation confirmed', itemId });
+        });
+    });
 });
 
-function clearRedisStock() {
-  const SET = promisify(redisClient.SET).bind(redisClient);
-  return Promise.all(listProducts.map((item) => SET(`item.${item.Id}`, 0)));
-}
+const resetProductsStock = () => {
+  return Promise.all(
+    listProducts.map(
+      item => promisify(client.SET).bind(client)(`item.${item.itemId}`, 0),
+    )
+  );
+};
 
-app.listen(1245, async () => {
-  await clearRedisStock();
-  console.log('API available on localhost via port 1245');
+app.listen(PORT, () => {
+  resetProductsStock()
+    .then(() => {
+      console.log(`API available on localhost port ${PORT}`);
+    });
 });
+
+export default app;

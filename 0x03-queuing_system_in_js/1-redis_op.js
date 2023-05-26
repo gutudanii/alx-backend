@@ -1,26 +1,22 @@
-#!/usr/bin/node
-/**
- * Connect to redis server via redis client
- */
-import { createClient, print } from 'redis';
+import redis from 'redis';
 
-const client = createClient();
-
-client.on('error', (err) => {
-  console.log('Redis client not connected to the server:', err.toString());
-});
+const client = redis.createClient();
 
 client.on('connect', () => {
   console.log('Redis client connected to the server');
 });
 
+client.on('error', (err) => {
+  console.error(`Redis client not connected to the server: ${err}`);
+});
+
 function setNewSchool(schoolName, value) {
-  client.SET(schoolName, value, print);
+  client.set(schoolName, value, redis.print);
 }
 
 function displaySchoolValue(schoolName) {
-  client.GET(schoolName, (err, value) => {
-    console.log(value);
+  client.get(schoolName, (err, reply) => {
+    console.log(reply);
   });
 }
 

@@ -1,22 +1,21 @@
-#!/usr/bin/node
-/**
- * Create a job
- */
+#!/usr/bin/yarn dev
 import { createQueue } from 'kue';
 
-const queue = createQueue();
-const jobData = { phoneNumber: '+2347065345423', message: 'Kindly verify your identification' };
+const queue = createQueue({name: 'push_notification_code'});
 
-const job = queue
-  .create('push_notification_code', jobData)
-  .save((err) => {
-    if (!err) console.log(`Notification job created: ${job.id}`);
+const job = queue.create('push_notification_code', {
+  phoneNumber: '07045679939',
+  message: 'Account registered',
+});
+
+job
+  .on('enqueue', () => {
+    console.log('Notification job created:', job.id);
+  })
+  .on('complete', () => {
+    console.log('Notification job completed');
+  })
+  .on('failed attempt', () => {
+    console.log('Notification job failed');
   });
-
-job.on('complete', (result) => { /* eslint-disable-line no-unused-vars */
-  console.log('Notification job completed');
-});
-
-job.on('failed', (err) => { /* eslint-disable-line no-unused-vars */
-  console.log('Notification job failed');
-});
+job.save();

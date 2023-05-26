@@ -1,10 +1,5 @@
-#!/usr/bin/node
-/**
- * Track progress and errors with Kue: Create the Job creator
- */
+#!/usr/bin/yarn dev
 import { createQueue } from 'kue';
-
-const queue = createQueue();
 
 const jobs = [
   {
@@ -53,19 +48,23 @@ const jobs = [
   },
 ];
 
-for (let job of jobs) {
-  job = queue.create('push_notification_code_2', job);
+const queue = createQueue({ name: 'push_notification_code_2' });
+
+for (const jobInfo of jobs) {
+  const job = queue.create('push_notification_code_2', jobInfo);
+
   job
-    .on('complete', (result) => { /* eslint-disable-line no-unused-vars */
-      console.log(`Notification job ${job.id} completed`);
+    .on('enqueue', () => {
+      console.log('Notification job created:', job.id);
     })
-    .on('failed', (err) => { /* eslint-disable-line no-unused-vars */
-      console.log(`Notification job ${job.id} failed: ${err.message || err.toString()}`);
+    .on('complete', () => {
+      console.log('Notification job', job.id, 'completed');
     })
-    .on('progress', (progress, data) => { /* eslint-disable-line no-unused-vars */
-      console.log(`Notification job ${job.id} ${progress}% complete`);
+    .on('failed', (err) => {
+      console.log('Notification job', job.id, 'failed:', err.message || err.toString());
     })
-    .save((err) => { /* eslint-disable-line no-unused-vars */
-      console.log(`Notification job created: ${job.id}`);
+    .on('progress', (progress, _data) => {
+      console.log('Notification job', job.id, `${progress}% complete`);
     });
+  job.save();
 }
